@@ -1,6 +1,5 @@
 pandas
 streamlit
-wheel
 av
 streamlit_webrtc
-pygame --pre
+pygame-ce
