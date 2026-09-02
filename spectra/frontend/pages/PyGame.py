@@ -1,3 +1,4 @@
+import base64
 import os
 import time
 
@@ -12,7 +13,7 @@ from streamlit_webrtc import (
     webrtc_streamer,
 )
 
-from graphics.renderer import render_frame, reset_animation_state
+from graphics.renderer import render_frame_jpeg, reset_animation_state
 
 from support.classes import DEFAULT_CATEGORY, SOUNDS_DICT
 
@@ -30,7 +31,10 @@ HOP_SECONDS=1
 # How often we ask the API for its latest prediction.
 POLL_INTERVAL = 0.25
 UPLOAD_TIMEOUT=10
-MAX_PREDICTIONS=200
+# The renderer draws at most 3 categories and adapt_predictions()
+# returns at most 3. Every extra slot costs two more elements on
+# page load and two more websocket deltas per prediction update.
+MAX_PREDICTIONS = 3
 STALE_AFTER=6.0
 # ==================================================
 # API CONFIGURATION
@@ -352,6 +356,39 @@ def adapt_predictions(
 
 
 # ==================================================
+# FRAME -> STREAMLIT
+# ==================================================
+
+# ~38 KB per frame. Letting st.image encode a numpy
+# frame uses JPEG quality 100, which is ~131 KB.
+JPEG_QUALITY = 75
+
+
+def frame_data_uri(predictions, rms):
+    """
+    Render one frame and inline it as a data: URL.
+
+    Giving st.image a URL string instead of pixels puts
+    the JPEG inside the websocket message itself:
+
+    - the browser no longer makes one HTTP request per
+      frame, so frames show up as fast as they are sent;
+    - Streamlit does not keep every frame in server RAM.
+      Its media store is only cleaned when the script run
+      ends, and this page loops for as long as the
+      microphone is on (~94 MB per minute at 12 fps).
+    """
+
+    jpeg = render_frame_jpeg(
+        predictions,
+        rms,
+        quality=JPEG_QUALITY,
+    )
+
+    return "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
+
+
+# ==================================================
 # WEBRTC MICROPHONE
 # ==================================================
 
@@ -448,8 +485,7 @@ if not webrtc_ctx.state.playing:
     #STATUS_WRITERS[level](status_placeholder, message)
 
     frame_placeholder.image(
-        render_frame([], 0.0),
-        channels="RGB",
+        frame_data_uri([], 0.0),
         width="stretch",
     )
 
@@ -512,8 +548,7 @@ else:
 
 
             frame_placeholder.image(
-                render_frame(predictions, rms),
-                channels="RGB",
+                frame_data_uri(predictions, rms),
                 width="stretch",
             )
 

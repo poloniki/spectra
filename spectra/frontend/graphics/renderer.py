@@ -1,3 +1,4 @@
+import io
 import math
 import random
 from pathlib import Path
@@ -131,47 +132,36 @@ BACKGROUND_IMAGE = (
 )
 
 
-CLAPPING_IMAGE = pygame.image.load(
-    str(
-        ASSETS_DIR
-        / "clapping-hands.png"
-    )
-)
+# Largest icon the layout ever draws: the hero is base_size 55
+# plus up to 45 for confidence, and draw_floating_icon doubles
+# that. The PNGs are 512-800 px, so shrinking them once here
+# makes the per-frame smoothscale ~15x cheaper.
+MAX_ICON_SIZE = 2 * (55 + 45)
 
-CAR_IMAGE = pygame.image.load(
-    str(
-        ASSETS_DIR
-        / "car.png"
-    )
-)
 
-ALARM_IMAGE = pygame.image.load(
-    str(
-        ASSETS_DIR
-        / "alarm.png"
-    )
-)
+def load_icon(filename):
 
-ANIMAL_IMAGE = pygame.image.load(
-    str(
-        ASSETS_DIR
-        / "animal.png"
+    image = pygame.image.load(
+        str(ASSETS_DIR / filename)
     )
-)
 
-NATURE_IMAGE = pygame.image.load(
-    str(
-        ASSETS_DIR
-        / "nature.png"
+    return pygame.transform.smoothscale(
+        image,
+        (MAX_ICON_SIZE, MAX_ICON_SIZE),
     )
-)
 
-TALKING_IMAGE = pygame.image.load(
-    str(
-        ASSETS_DIR
-        / "talking.png"
-    )
-)
+
+CLAPPING_IMAGE = load_icon("clapping-hands.png")
+
+CAR_IMAGE = load_icon("car.png")
+
+ALARM_IMAGE = load_icon("alarm.png")
+
+ANIMAL_IMAGE = load_icon("animal.png")
+
+NATURE_IMAGE = load_icon("nature.png")
+
+TALKING_IMAGE = load_icon("talking.png")
 
 
 # ==================================================
@@ -489,12 +479,12 @@ def draw_divider(
 # RENDER ONE FRAME
 # ==================================================
 
-def render_frame(
+def render_surface(
     predictions,
     rms=0.0,
 ):
     """
-    Produce one complete Spectra visualization.
+    Draw one complete Spectra visualization.
 
     Expected predictions:
 
@@ -516,10 +506,11 @@ def render_frame(
 
     Returns
     -------
-    numpy.ndarray
-        RGB image with shape:
+    pygame.Surface
+        SCREEN_WIDTH x SCREEN_HEIGHT, RGB.
 
-        height x width x RGB
+        Use render_frame() for a numpy array or
+        render_frame_jpeg() for encoded bytes.
     """
 
     if predictions is None:
@@ -1486,9 +1477,35 @@ def render_frame(
         )
 
 
-    # ==================================================
-    # 13. PYGAME SURFACE -> NUMPY
-    # ==================================================
+    return surface
+
+
+# ==================================================
+# OUTPUT FORMATS
+# ==================================================
+
+def render_frame(
+    predictions,
+    rms=0.0,
+):
+    """
+    Render one frame as a numpy array.
+
+    Used by the desktop Pygame app and tests.
+
+    Returns
+    -------
+    numpy.ndarray
+        RGB image with shape:
+
+        height x width x RGB
+    """
+
+    surface = render_surface(
+        predictions,
+        rms,
+    )
+
 
     frame = pygame.surfarray.array3d(
         surface
@@ -1501,11 +1518,64 @@ def render_frame(
     # Streamlit:
     # height x width x RGB
 
-    frame = np.swapaxes(
+    return np.swapaxes(
         frame,
         0,
         1,
     )
 
 
-    return frame
+def render_frame_jpeg(
+    predictions,
+    rms=0.0,
+    quality=75,
+):
+    """
+    Render one frame as JPEG bytes.
+
+    Used by the Streamlit page. Skips the numpy round
+    trip and encodes at `quality` instead of the
+    quality 100 that st.image applies to arrays, which
+    is ~4x smaller and faster.
+
+    Returns
+    -------
+    bytes
+        JPEG file contents.
+    """
+
+    # Pillow ships with Streamlit. Import lazily so the
+    # desktop app can use renderer.py without it.
+    from PIL import Image
+
+
+    surface = render_surface(
+        predictions,
+        rms,
+    )
+
+
+    image = Image.frombuffer(
+        "RGB",
+        surface.get_size(),
+        pygame.image.tobytes(
+            surface,
+            "RGB",
+        ),
+        "raw",
+        "RGB",
+        0,
+        1,
+    )
+
+
+    buffer = io.BytesIO()
+
+    image.save(
+        buffer,
+        format="JPEG",
+        quality=quality,
+    )
+
+
+    return buffer.getvalue()
