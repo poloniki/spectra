@@ -5,7 +5,7 @@ import numpy as np
 import pygame
 import requests
 
-from graphics.renderer import (
+from renderer import (
     render_frame,
     SCREEN_WIDTH,
     SCREEN_HEIGHT,
